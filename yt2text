@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# yt2text: Estrae trascrizioni e sottotitoli da video YouTube in testo pulito o VTT.
+set -euo pipefail
+
+PROG_NAME="$(basename "$0")"
+
+usage() {
+  cat <<EOF
+Uso: $PROG_NAME -u URL -o FILE [opzioni]
+
+Estrae la trascrizione o i sottotitoli da un video YouTube.
+
+Opzioni obbligatorie:
+  -u URL    URL del video YouTube
+  -o FILE   File di output (.txt o .vtt), oppure '-' per stdout
+
+Opzioni facoltative:
+  -l LANG   Lingua preferita dei sottotitoli (default: 'it', con fallback a 'en')
+  -t        Mantiene i timestamp nel formato VTT originale
+  -U        Forza l'aggiornamento del binario yt-dlp nella cache
+  -h        Mostra questo messaggio di aiuto
+
+Esempi:
+  $PROG_NAME -u "https://www.youtube.com/watch?v=VIDEO_ID" -o trascrizione.txt
+  $PROG_NAME -u "https://youtu.be/VIDEO_ID" -o sottotitoli.vtt -t
+  $PROG_NAME -u "https://www.youtube.com/watch?v=VIDEO_ID" -o -
+EOF
+}
+
+url=""
+out=""
+lang="it"
+keep_timestamps=0
+force_update=0
+
+while getopts ":u:o:l:tUh" opt; do
+  case "$opt" in
+    u) url="$OPTARG" ;;
+    o) out="$OPTARG" ;;
+    l) lang="$OPTARG" ;;
+    t) keep_timestamps=1 ;;
+    U) force_update=1 ;;
+    h) usage; exit 0 ;;
+    :) echo "Errore: l'opzione -$OPTARG richiede un valore." >&2; usage; exit 2 ;;
+    \?) echo "Errore: opzione -$OPTARG non valida." >&2; usage; exit 2 ;;
+  esac
+done
+
+if [[ -z "$url" || -z "$out" ]]; then
+  echo "Errore: specificare sia -u URL sia -o FILE." >&2
+  usage
+  exit 2
+fi
+
+# Validazione base dell'URL per prevenire passaggio di argomenti anomali
+if [[ ! "$url" =~ ^https?:// ]]; then
+  echo "Errore: l'URL deve iniziare con http:// o https://" >&2
+  exit 2
+fi
+
+# Gestione cache locale di yt-dlp per evitare download ripetuti a ogni esecuzione
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/yt2text"
+YTDLP_BIN="$CACHE_DIR/yt-dlp"
+mkdir -p "$CACHE_DIR"
+
+if [[ ! -x "$YTDLP_BIN" || $force_update -eq 1 ]]; then
+  echo "Download dell'ultima versione di yt-dlp..." >&2
+  tmp_bin="$CACHE_DIR/yt-dlp.tmp.$$"
+  if curl -fsSL 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp' -o "$tmp_bin"; then
+    chmod +x "$tmp_bin"
+    mv "$tmp_bin" "$YTDLP_BIN"
+  else
+    rm -f "$tmp_bin"
+    if [[ ! -x "$YTDLP_BIN" ]]; then
+      echo "Errore: impossibile scaricare yt-dlp e nessuna versione in cache trovata." >&2
+      exit 1
+    fi
+    echo "Avviso: aggiornamento non riuscito, uso la versione presente in cache." >&2
+  fi
+fi
+
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+
+# Tentativo con la lingua richiesta
+"$YTDLP_BIN" --skip-download --write-subs --write-auto-subs \
+  --sub-langs "$lang" --sub-format vtt \
+  -o "$tmpdir/captions.%(ext)s" "$url" >/dev/null 2>&1 || true
+
+vtt=$(find "$tmpdir" -maxdepth 1 -type f \( -name "captions.$lang.vtt" -o -name "captions.$lang-*.vtt" \) | head -n1 || true)
+
+# Se non trovata e diversa da 'en', tenta il fallback su inglese
+if [[ -z "$vtt" || ! -f "$vtt" ]]; then
+  if [[ "$lang" != "en" ]]; then
+    echo "Sottotitoli in '$lang' non trovati; provo in inglese ('en')..." >&2
+    "$YTDLP_BIN" --skip-download --write-subs --write-auto-subs \
+      --sub-langs 'en' --sub-format vtt \
+      -o "$tmpdir/captions.%(ext)s" "$url" >/dev/null 2>&1 || true
+    vtt=$(find "$tmpdir" -maxdepth 1 -type f \( -name "captions.en.vtt" -o -name "captions.en-*.vtt" \) | head -n1 || true)
+  fi
+fi
+
+if [[ -z "$vtt" || ! -f "$vtt" ]]; then
+  echo "Errore: nessun sottotitolo disponibile per questo video." >&2
+  exit 1
+fi
+
+if (( keep_timestamps )); then
+  if [[ "$out" == "-" ]]; then
+    cat "$vtt"
+  else
+    mkdir -p "$(dirname "$out")"
+    cp "$vtt" "$out"
+    echo "Sottotitoli salvati in: $out" >&2
+  fi
+else
+  # Pulizia dei sottotitoli in testo piano (rimuove tag VTT, timestamp e duplicati consecutivi)
+  clean_script='
+import html, re, sys
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dest_path = sys.argv[2]
+
+result = []
+for raw_line in src.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+    line = raw_line.strip()
+    if not line or line == "WEBVTT" or "-->" in line or line.isdigit() or line.startswith(("NOTE", "Kind:", "Language:")):
+        continue
+    line = html.unescape(re.sub(r"<[^>]*>", "", line)).strip()
+    if line and (not result or line != result[-1]):
+        result.append(line)
+
+cleaned_text = "\n".join(result) + "\n"
+if dest_path == "-":
+    sys.stdout.write(cleaned_text)
+else:
+    Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(dest_path).write_text(cleaned_text, encoding="utf-8")
+'
+  python3 -c "$clean_script" "$vtt" "$out"
+  if [[ "$out" != "-" ]]; then
+    echo "Trascrizione salvata in: $out" >&2
+  fi
+fi
