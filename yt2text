@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# yt2text: Estrae trascrizioni e sottotitoli da video YouTube in testo pulito o VTT.
+# yt2text: Extract transcripts and subtitles from YouTube videos as clean plain text or WebVTT.
 set -euo pipefail
 
 PROG_NAME="$(basename "$0")"
 
 usage() {
   cat <<EOF
-Uso: $PROG_NAME -u URL -o FILE [opzioni]
+Usage: $PROG_NAME -u URL -o FILE [options]
 
-Estrae la trascrizione o i sottotitoli da un video YouTube.
+Extract subtitles or auto-generated transcripts from any YouTube video.
 
-Opzioni obbligatorie:
-  -u URL    URL del video YouTube
-  -o FILE   File di output (.txt o .vtt), oppure '-' per stdout
+Required arguments:
+  -u URL    YouTube video URL
+  -o FILE   Output file path (.txt or .vtt), or '-' for stdout
 
-Opzioni facoltative:
-  -l LANG   Lingua preferita dei sottotitoli (default: 'it', con fallback a 'en')
-  -t        Mantiene i timestamp nel formato VTT originale
-  -U        Forza l'aggiornamento del binario yt-dlp nella cache
-  -h        Mostra questo messaggio di aiuto
+Optional arguments:
+  -l LANG   Preferred subtitle language code (default: 'it', falls back to 'en')
+  -t        Keep timing information in original WebVTT format
+  -U        Force update the cached yt-dlp binary
+  -h        Display this help message
 
-Esempi:
-  $PROG_NAME -u "https://www.youtube.com/watch?v=VIDEO_ID" -o trascrizione.txt
-  $PROG_NAME -u "https://youtu.be/VIDEO_ID" -o sottotitoli.vtt -t
+Examples:
+  $PROG_NAME -u "https://www.youtube.com/watch?v=VIDEO_ID" -o transcript.txt
+  $PROG_NAME -u "https://youtu.be/VIDEO_ID" -o subtitles.vtt -t
   $PROG_NAME -u "https://www.youtube.com/watch?v=VIDEO_ID" -o -
 EOF
 }
@@ -41,30 +41,30 @@ while getopts ":u:o:l:tUh" opt; do
     t) keep_timestamps=1 ;;
     U) force_update=1 ;;
     h) usage; exit 0 ;;
-    :) echo "Errore: l'opzione -$OPTARG richiede un valore." >&2; usage; exit 2 ;;
-    \?) echo "Errore: opzione -$OPTARG non valida." >&2; usage; exit 2 ;;
+    :) echo "Error: option -$OPTARG requires a value." >&2; usage; exit 2 ;;
+    \?) echo "Error: invalid option -$OPTARG." >&2; usage; exit 2 ;;
   esac
 done
 
 if [[ -z "$url" || -z "$out" ]]; then
-  echo "Errore: specificare sia -u URL sia -o FILE." >&2
+  echo "Error: both -u URL and -o FILE are required." >&2
   usage
   exit 2
 fi
 
-# Validazione base dell'URL per prevenire passaggio di argomenti anomali
+# Basic URL validation
 if [[ ! "$url" =~ ^https?:// ]]; then
-  echo "Errore: l'URL deve iniziare con http:// o https://" >&2
+  echo "Error: URL must start with http:// or https://" >&2
   exit 2
 fi
 
-# Gestione cache locale di yt-dlp per evitare download ripetuti a ogni esecuzione
+# Manage cached yt-dlp binary to avoid re-downloading on every invocation
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/yt2text"
 YTDLP_BIN="$CACHE_DIR/yt-dlp"
 mkdir -p "$CACHE_DIR"
 
 if [[ ! -x "$YTDLP_BIN" || $force_update -eq 1 ]]; then
-  echo "Download dell'ultima versione di yt-dlp..." >&2
+  echo "Downloading latest yt-dlp release..." >&2
   tmp_bin="$CACHE_DIR/yt-dlp.tmp.$$"
   if curl -fsSL 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp' -o "$tmp_bin"; then
     chmod +x "$tmp_bin"
@@ -72,27 +72,27 @@ if [[ ! -x "$YTDLP_BIN" || $force_update -eq 1 ]]; then
   else
     rm -f "$tmp_bin"
     if [[ ! -x "$YTDLP_BIN" ]]; then
-      echo "Errore: impossibile scaricare yt-dlp e nessuna versione in cache trovata." >&2
+      echo "Error: failed to download yt-dlp and no cached binary was found." >&2
       exit 1
     fi
-    echo "Avviso: aggiornamento non riuscito, uso la versione presente in cache." >&2
+    echo "Warning: update failed, falling back to cached yt-dlp." >&2
   fi
 fi
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
-# Tentativo con la lingua richiesta
+# First attempt with requested language
 "$YTDLP_BIN" --skip-download --write-subs --write-auto-subs \
   --sub-langs "$lang" --sub-format vtt \
   -o "$tmpdir/captions.%(ext)s" "$url" >/dev/null 2>&1 || true
 
 vtt=$(find "$tmpdir" -maxdepth 1 -type f \( -name "captions.$lang.vtt" -o -name "captions.$lang-*.vtt" \) | head -n1 || true)
 
-# Se non trovata e diversa da 'en', tenta il fallback su inglese
+# If not found and requested language was not English, fallback to English
 if [[ -z "$vtt" || ! -f "$vtt" ]]; then
   if [[ "$lang" != "en" ]]; then
-    echo "Sottotitoli in '$lang' non trovati; provo in inglese ('en')..." >&2
+    echo "Subtitles for '$lang' not found; trying English ('en')..." >&2
     "$YTDLP_BIN" --skip-download --write-subs --write-auto-subs \
       --sub-langs 'en' --sub-format vtt \
       -o "$tmpdir/captions.%(ext)s" "$url" >/dev/null 2>&1 || true
@@ -101,7 +101,7 @@ if [[ -z "$vtt" || ! -f "$vtt" ]]; then
 fi
 
 if [[ -z "$vtt" || ! -f "$vtt" ]]; then
-  echo "Errore: nessun sottotitolo disponibile per questo video." >&2
+  echo "Error: no subtitles or transcripts available for this video." >&2
   exit 1
 fi
 
@@ -111,10 +111,10 @@ if (( keep_timestamps )); then
   else
     mkdir -p "$(dirname "$out")"
     cp "$vtt" "$out"
-    echo "Sottotitoli salvati in: $out" >&2
+    echo "Subtitles saved to: $out" >&2
   fi
 else
-  # Pulizia dei sottotitoli in testo piano (rimuove tag VTT, timestamp e duplicati consecutivi)
+  # Clean subtitles into plain text (strip VTT headers, timestamps, HTML tags, and consecutive duplicate lines)
   clean_script='
 import html, re, sys
 from pathlib import Path
@@ -140,6 +140,6 @@ else:
 '
   python3 -c "$clean_script" "$vtt" "$out"
   if [[ "$out" != "-" ]]; then
-    echo "Trascrizione salvata in: $out" >&2
+    echo "Transcript saved to: $out" >&2
   fi
 fi

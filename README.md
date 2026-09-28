@@ -1,59 +1,59 @@
 # yt2text
 
-Semplice e veloce script Bash per estrarre trascrizioni e sottotitoli da video YouTube in **testo piano pulito** o in formato **VTT con timestamp**.
+A lightweight and fast Bash script to extract transcripts and subtitles from YouTube videos as **clean plain text** or **WebVTT with timestamps**.
 
-Supporta il download dei sottotitoli manuali e generati automaticamente (con deduplicazione intelligente delle righe ripetute tipiche di YouTube), cache automatica dell'eseguibile `yt-dlp` e supporto per stdout (`-o -`).
+Features automatic downloading of manual and auto-generated subtitles, intelligent deduplication of repeated lines (common with scrolling YouTube auto-captions), automatic caching of the standalone `yt-dlp` executable, and pipeable stdout support (`-o -`).
 
-## Prerequisiti
+## Prerequisites
 
-Lo script richiede solo utility standard disponibili su qualsiasi distribuzione Linux moderna:
+The script requires standard Unix utilities available on virtually any modern Linux distribution:
 - **Bash** (4+)
 - **curl**
-- **Python 3** (per il parsing e la pulizia del formato VTT)
+- **Python 3** (used internally for clean VTT parsing and text normalization)
 
-Non richiede pacchetti Python di terze parti. L'estrattore `yt-dlp` aggiornato viene scaricato automaticamente alla prima esecuzione e memorizzato nella cache dell'utente (`~/.cache/yt2text/`).
+No third-party Python packages are required. A standalone, up-to-date `yt-dlp` binary is downloaded automatically on first run and cached in `~/.cache/yt2text/`.
 
-## Installazione
+## Installation
 
 ```bash
 git clone https://github.com/mattiacentonze/yt2text.git
 cd yt2text
 chmod +x yt2text
 ln -s "$(pwd)/yt2text" ~/.local/bin/yt2text
-# Opzionale: crea un alias breve yt2txt
+# Optional: create a short alias yt2txt
 ln -s "$(pwd)/yt2text" ~/.local/bin/yt2txt
 ```
 
-## Utilizzo
+## Usage
 
 ```bash
-# Estrae la trascrizione in testo pulito (default lingua italiana, fallback inglese)
-yt2text -u "https://www.youtube.com/watch?v=VIDEO_ID" -o trascrizione.txt
+# Extract transcript as clean text (defaults to Italian with automatic English fallback)
+yt2text -u "https://www.youtube.com/watch?v=VIDEO_ID" -o transcript.txt
 
-# Stampa direttamente il testo a terminale (stdout)
+# Print transcript directly to standard output (pipeable)
 yt2text -u "https://www.youtube.com/watch?v=VIDEO_ID" -o -
 
-# Mantiene i timestamp nel formato originale WebVTT
-yt2text -u "https://www.youtube.com/watch?v=VIDEO_ID" -o sottotitoli.vtt -t
+# Preserve timestamps in original WebVTT format
+yt2text -u "https://www.youtube.com/watch?v=VIDEO_ID" -o subtitles.vtt -t
 
-# Specifica una lingua diversa (es. spagnolo 'es', francese 'fr')
-yt2text -u "https://www.youtube.com/watch?v=VIDEO_ID" -o testo.txt -l es
+# Specify a preferred language (e.g. Spanish 'es', French 'fr', English 'en')
+yt2text -u "https://www.youtube.com/watch?v=VIDEO_ID" -o text.txt -l en
 
-# Aggiorna il motore yt-dlp memorizzato nella cache
+# Force update the cached yt-dlp binary
 yt2text -U -u "https://www.youtube.com/watch?v=VIDEO_ID" -o test.txt
 ```
 
-### Opzioni
+### Options
 
-| Opzione | Descrizione |
+| Option | Description |
 |---|---|
-| `-u URL` | **Obbligatorio.** URL del video YouTube |
-| `-o FILE` | **Obbligatorio.** File di output desiderato, oppure `-` per stdout |
-| `-l LANG` | Lingua preferita dei sottotitoli (default: `it`, fallback automatico a `en`) |
-| `-t` | Mantiene i timestamp salvando il file in formato WebVTT |
-| `-U` | Forza l'aggiornamento dell'eseguibile `yt-dlp` nella cache locale |
-| `-h` | Mostra la guida all'uso |
+| `-u URL` | **Required.** Target YouTube video URL |
+| `-o FILE` | **Required.** Output file path, or `-` for standard output |
+| `-l LANG` | Preferred subtitle language code (default: `it`, fallback: `en`) |
+| `-t` | Keep timestamps and export in original WebVTT format |
+| `-U` | Force update the local `yt-dlp` binary in the cache directory |
+| `-h` | Display usage help |
 
-## Licenza
+## License
 
-Rilasciato sotto licenza [MIT](LICENSE).
+Released under the [MIT](LICENSE) License.
